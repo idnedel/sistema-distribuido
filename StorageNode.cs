@@ -93,24 +93,24 @@ namespace DistributedStorageSystem
                     switch (cmd)
                     {
                         case 
-                            "UPLOAD": 
-                                TrataUpload(reader, writer); break;
+                            "UPLOAD":
+                            TrataUpload(reader, writer); break;
                         case 
-                            "PUT_PART": 
-                                TrataColocaParte(reader, writer); break;
-                        case 
-                            "GET_PART": 
-                                TrataObtemParte(reader, writer); break;
-                        case 
-                            "PUT_META": 
-                                TrataColocaMeta(reader, writer); break;
-                        case 
-                            "LISTALL": 
-                                TrataLista(writer); break;
-                        case 
-                            "DOWNLOAD": 
-                                TrataDownload(reader, writer); break;
-                        case 
+                            "PART":
+                            TrataColocaParte(reader, writer); break;
+                        case
+                            "GET_PART":
+                            TrataObtemParte(reader, writer); break;
+                        case
+                            "META":
+                            TrataColocaMeta(reader, writer); break;
+                        case
+                            "LISTALL":
+                            TrataLista(writer); break;
+                        case
+                            "DOWNLOAD":
+                            TrataDownload(reader, writer); break;
+                        case
                             "SHUTDOWN":
                                 Console.WriteLine($"[NODE {port}] Encerrando...");
                                 writer.Write("OK");
@@ -136,7 +136,7 @@ namespace DistributedStorageSystem
             byte[] data = reader.ReadBytes(size);
 
             // calcula fragmentos
-            int parts = (int)Math.Ceiling(size / (double)Config.CHUNK_SIZE);
+            int parts = (int)Math.Ceiling(size / (double)Config.FRAG_SIZE);
 
             // armazena metadados local e replica
             ColocaMetaLocal(filename, parts, size);
@@ -145,8 +145,8 @@ namespace DistributedStorageSystem
             // fragmenta em partes de 128KB e distribui
             for (int i = 0; i < parts; i++)
             {
-                int start = i * Config.CHUNK_SIZE;
-                int end = Math.Min(start + Config.CHUNK_SIZE, size);
+                int start = i * Config.FRAG_SIZE;
+                int end = Math.Min(start + Config.FRAG_SIZE, size);
                 byte[] chunk = new byte[end - start];
                 Array.Copy(data, start, chunk, 0, chunk.Length);
                 DistribuiParte(filename, i, chunk); // distribui fragmento
@@ -172,7 +172,7 @@ namespace DistributedStorageSystem
             {
                 Envia(targetPort, (writer, reader) =>
                 {
-                    writer.Write("PUT_PART");
+                    writer.Write("PART");
                     writer.Write(filename);
                     writer.Write(partIndex);
                     writer.Write(chunk.Length);
@@ -252,7 +252,7 @@ namespace DistributedStorageSystem
                 {
                     Envia(p, (writer, reader) =>
                     {
-                        writer.Write("PUT_META");
+                        writer.Write("META");
                         writer.Write(filename);
                         writer.Write(parts);
                         writer.Write(size);
@@ -263,16 +263,40 @@ namespace DistributedStorageSystem
             }
         }
 
-        // listagem dos arquivos armazenados
+
+        // listagem dos arquivos armazenados com informações extras
         private void TrataLista(BinaryWriter writer)
         {
             lock (metadataLock)
             {
-                var files = metadata.Keys.OrderBy(k => k).ToList();
+                var arquivos = metadata.Keys.OrderBy(k => k).ToList();
                 writer.Write("OK");
-                writer.Write(files.Count);
-                foreach (string file in files) writer.Write(file);
+                writer.Write(arquivos.Count);
+
+                // enviar informações
+                foreach (string arquivo in arquivos)
+                {
+                    var meta = metadata[arquivo];
+                    string infoArquivo = $"{arquivo} | Tamanho: {FormatarTamanho(meta.TotalSize)} | Fragmentos: {meta.Parts}";
+                    writer.Write(infoArquivo);
+                }
             }
+        }
+
+        // método auxiliar para formatar tamanhos
+        private string FormatarTamanho(long bytes)
+        {
+            string[] sufixos = { "B", "KB", "MB", "GB" };
+            int contador = 0;
+            decimal numero = bytes;
+
+            while (Math.Round(numero / 1024) >= 1 && contador < sufixos.Length - 1)
+            {
+                numero /= 1024;
+                contador++;
+            }
+
+            return $"{numero:n1} {sufixos[contador]}";
         }
 
         // trata download, reagrupa fragmentos
@@ -363,7 +387,7 @@ namespace DistributedStorageSystem
 
         private string CaminhoArquivoMeta => Path.Combine(storageDir, "metadata.db");
 
-        
+        // salva metadados em formato JSON-like
         private void SalvaMetadadosNoDisco()
         {
             lock (metadataLock)
@@ -372,12 +396,13 @@ namespace DistributedStorageSystem
                 {
                     foreach (var entry in metadata)
                     {
-                        sw.WriteLine($"{entry.Key}|{entry.Value.Parts}|{entry.Value.TotalSize}");
+                        sw.WriteLine($"{{nome:\"{entry.Key}\",partes:{entry.Value.Parts},tamanho:{entry.Value.TotalSize}}}");
                     }
                 }
             }
         }
 
+        // carrega metadados 
         private void CarregaMetadadosDoDisco()
         {
             string filePath = CaminhoArquivoMeta;
@@ -387,10 +412,25 @@ namespace DistributedStorageSystem
             {
                 foreach (string line in File.ReadAllLines(filePath))
                 {
-                    string[] parts = line.Split('|');
-                    if (parts.Length == 3)
+                    // parse
+                    try
                     {
-                        metadata[parts[0]] = new FileMeta(int.Parse(parts[1]), long.Parse(parts[2]));
+                        // remove chaves e divide por vírgulas
+                        var conteudo = line.Trim('{', '}');
+                        var partes = conteudo.Split(',');
+
+                        if (partes.Length == 3)
+                        {
+                            string nome = partes[0].Split(':')[1].Trim('"');
+                            int numPartes = int.Parse(partes[1].Split(':')[1]);
+                            long tamanho = long.Parse(partes[2].Split(':')[1]);
+
+                            metadata[nome] = new FileMeta(numPartes, tamanho);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[NÓ {port}] Erro ao carregar metadado: {line} - {ex.Message}");
                     }
                 }
             }
