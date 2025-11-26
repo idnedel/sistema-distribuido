@@ -8,6 +8,7 @@ namespace DistributedStorageSystem
 {
     public class Client
     {
+        //armazenar porta do nó alvo
         private readonly int port;
 
         public Client(int port)
@@ -15,6 +16,7 @@ namespace DistributedStorageSystem
             this.port = port;
         }
 
+        //upload de arquivo
         public void Upload(string filePath)
         {
             Send((writer, reader) =>
@@ -32,11 +34,12 @@ namespace DistributedStorageSystem
             });
         }
 
+        //listar arquivos
         public void List()
         {
             Send((writer, reader) =>
             {
-                writer.Write("LIST_GLOBAL");
+                writer.Write("LISTALL");
 
                 string resp = reader.ReadString();
                 if (resp != "OK")
@@ -45,6 +48,7 @@ namespace DistributedStorageSystem
                     return;
                 }
 
+                //qtd de arquivos
                 int count = reader.ReadInt32();
                 SortedSet<string> files = new SortedSet<string>();
                 for (int i = 0; i < count; i++)
@@ -60,6 +64,7 @@ namespace DistributedStorageSystem
             });
         }
 
+        //baixar arquivo
         public void Download(string filename, string outputPath)
         {
             Send((writer, reader) =>
@@ -81,7 +86,7 @@ namespace DistributedStorageSystem
                 Console.WriteLine($"DOWNLOAD OK -> {outputPath}");
             });
         }
-
+        //derrubar nó
         public void Shutdown()
         {
             Send((writer, reader) =>
@@ -95,8 +100,11 @@ namespace DistributedStorageSystem
         {
             try
             {
+                //conexão tcp
                 using (TcpClient client = new TcpClient(Config.HOST, port))
+                //obtem fluxo de rede
                 using (NetworkStream stream = client.GetStream())
+                //leitores e escritores binários para o fluxo
                 using (BinaryReader reader = new BinaryReader(stream, Encoding.UTF8, true))
                 using (BinaryWriter writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
@@ -109,31 +117,39 @@ namespace DistributedStorageSystem
             }
         }
 
-        // recebe args a partir do índice após o token "client"
+        // recebe args
         public static void RunAsClient(string[] args)
         {
+            //valida numero minimo de args
             if (args.Length < 2)
             {
-                Console.WriteLine(
-                    "Uso:\n" +
-                    " dotnet run -- client <porta> upload <arquivo>\n" +
-                    " dotnet run -- client <porta> download <nome> <saida>\n" +
-                    " dotnet run -- client <porta> list\n" +
-                    " dotnet run -- client <porta> shutdown\n"
-                );
+                Console.WriteLine("Digite o comando...");
                 return;
             }
 
+            //parse da porta do nó
             int port = int.Parse(args[0]);
+
+            //cria cliente
             Client client = new Client(port);
 
+            //segundo args determina ação
             switch (args[1])
             {
-                case "upload": client.Upload(args[2]); break;
-                case "download": client.Download(args[2], args[3]); break;
-                case "list": client.List(); break;
-                case "shutdown": client.Shutdown(); break;
-                default: Console.WriteLine("Comando inválido"); break;
+                case 
+                    "upload": 
+                        client.Upload(args[2]); break;
+                case 
+                    "download": 
+                        client.Download(args[2], args[3]); break;
+                case
+                    "list": 
+                        client.List(); break;
+                case
+                    "shutdown": 
+                        client.Shutdown(); break;
+                default:
+                        Console.WriteLine("Comando inválido"); break;
             }
         }
     }
